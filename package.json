@@ -7,7 +7,8 @@
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
     "hls.js": "^1.5.7",
-    "@iptv/playlist": "^1.0.0"
+    "@iptv/playlist": "^1.0.0",
+    "concurrently": "^8.2.0"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.0",
@@ -15,7 +16,9 @@
     "postcss": "^8.4.0"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "concurrently \"node proxy.js\" \"react-scripts start\"",
+    "start:app": "react-scripts start",
+    "start:proxy": "node proxy.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

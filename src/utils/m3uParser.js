@@ -1,6 +1,7 @@
+import { isProxyAvailable, getProxyFetchUrl } from './proxy';
+
 /**
- * CORS proxies — we try multiple in order so the app doesn't break
- * when one goes down (which happens constantly with free proxies).
+ * CORS proxies — fallback when local proxy isn't running.
  */
 const CORS_PROXIES = [
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
@@ -9,19 +10,32 @@ const CORS_PROXIES = [
 ];
 
 async function fetchWithFallback(url) {
-  // First try direct (works for GitHub-hosted files which have CORS headers)
+  // 1. Try local proxy first (fastest, most reliable)
+  if (await isProxyAvailable()) {
+    try {
+      const res = await fetch(getProxyFetchUrl(url), { signal: AbortSignal.timeout(15000) });
+      if (res.ok) {
+        const text = await res.text();
+        if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
+      }
+    } catch {}
+  }
+
+  // 2. Try direct fetch (works for GitHub-hosted files with CORS headers)
   try {
-    const res = await fetch(url);
-    if (res.ok) return await res.text();
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const text = await res.text();
+      if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
+    }
   } catch {}
 
-  // Try each proxy in order
+  // 3. Try each remote CORS proxy
   for (const proxy of CORS_PROXIES) {
     try {
       const res = await fetch(proxy(url), { signal: AbortSignal.timeout(15000) });
       if (res.ok) {
         const text = await res.text();
-        // Make sure we got actual M3U content, not an error page
         if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
       }
     } catch {}
@@ -49,16 +63,12 @@ export function parseM3UText(text) {
     const line = lines[i];
     if (line.startsWith('#EXTINF')) {
       current = {};
-      // Extract name
       const nameMatch = line.match(/,(.+)$/);
       current.name = nameMatch ? nameMatch[1].trim() : 'Unknown';
-      // Extract group
       const groupMatch = line.match(/group-title="([^"]*)"/i);
       current.group = groupMatch ? groupMatch[1] : 'Uncategorized';
-      // Extract logo
       const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
       current.logo = logoMatch ? logoMatch[1] : '';
-      // Extract tvg-id for EPG
       const idMatch = line.match(/tvg-id="([^"]*)"/i);
       current.tvgId = idMatch ? idMatch[1] : '';
     } else if (line.startsWith('http') || line.startsWith('rtmp') || line.startsWith('rtsp')) {
@@ -68,12 +78,4 @@ export function parseM3UText(text) {
     }
   }
   return channels;
-}
-
-/**
- * Get a CORS-proxied version of a stream URL for HLS.js playback.
- * Call this when direct playback fails.
- */
-export function getProxiedStreamUrl(url) {
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 }

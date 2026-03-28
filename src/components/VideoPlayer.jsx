@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getProxiedStreamUrl } from '../utils/m3uParser';
+import { isProxyAvailable, getProxyStreamUrl } from '../utils/proxy';
 
 export default function VideoPlayer({ channel }) {
   const videoRef = useRef(null);
@@ -23,7 +23,16 @@ export default function VideoPlayer({ channel }) {
 
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-    function loadStream(url) {
+    async function startPlayback() {
+      const hasProxy = await isProxyAvailable();
+
+      // If local proxy is running, use it from the start — no CORS issues
+      const streamUrl = hasProxy ? getProxyStreamUrl(channel.url) : channel.url;
+
+      loadStream(streamUrl, hasProxy);
+    }
+
+    function loadStream(streamUrl, usedProxy) {
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -33,7 +42,7 @@ export default function VideoPlayer({ channel }) {
           },
         });
         hlsRef.current = hls;
-        hls.loadSource(url);
+        hls.loadSource(streamUrl);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -44,13 +53,20 @@ export default function VideoPlayer({ channel }) {
 
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
-            // If direct load failed, retry through CORS proxy once
-            if (!retriedRef.current && url === channel.url) {
+            // If direct load failed and we haven't tried the proxy yet, retry through it
+            if (!retriedRef.current && !usedProxy) {
               retriedRef.current = true;
               setStatus('retrying');
               hls.destroy();
               hlsRef.current = null;
-              loadStream(getProxiedStreamUrl(channel.url));
+              // Try proxy as fallback
+              isProxyAvailable().then(hasProxy => {
+                if (hasProxy) {
+                  loadStream(getProxyStreamUrl(channel.url), true);
+                } else {
+                  setStatus('error');
+                }
+              });
             } else {
               setStatus('error');
             }
@@ -58,14 +74,20 @@ export default function VideoPlayer({ channel }) {
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Safari native HLS
-        video.src = url;
+        video.src = streamUrl;
         video.addEventListener('loadeddata', () => setStatus('playing'), { once: true });
         video.addEventListener('error', () => {
-          if (!retriedRef.current && url === channel.url) {
+          if (!retriedRef.current && !usedProxy) {
             retriedRef.current = true;
             setStatus('retrying');
-            video.src = getProxiedStreamUrl(channel.url);
-            video.play().catch(() => {});
+            isProxyAvailable().then(hasProxy => {
+              if (hasProxy) {
+                video.src = getProxyStreamUrl(channel.url);
+                video.play().catch(() => {});
+              } else {
+                setStatus('error');
+              }
+            });
           } else {
             setStatus('error');
           }
@@ -74,7 +96,7 @@ export default function VideoPlayer({ channel }) {
       }
     }
 
-    loadStream(channel.url);
+    startPlayback();
 
     return () => {
       if (hlsRef.current) hlsRef.current.destroy();
