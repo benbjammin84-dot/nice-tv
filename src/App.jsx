@@ -5,7 +5,10 @@ import VideoPlayer from './components/VideoPlayer';
 import { usePlaylists } from './hooks/usePlaylists';
 
 export default function App() {
-  const { sources, addSource, removeSource, activeSource, setActiveSource } = usePlaylists();
+  const {
+    sources, addSource, quickAdd, bulkAdd, removeSource,
+    clearAll, resetDefaults, activeSource, setActiveSource, hasSource,
+  } = usePlaylists();
   const [activeChannel, setActiveChannel] = useState(null);
   const [activeCategory, setActiveCategory] = useState('All');
 
@@ -14,7 +17,18 @@ export default function App() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-3 border-b border-niceborder bg-nicepanel">
         <h1 className="text-xl font-bold tracking-widest glow text-niceglow">📺 NICE TV</h1>
-        <SourceManager sources={sources} onAdd={addSource} onRemove={removeSource} activeSource={activeSource} onSelect={setActiveSource} />
+        <SourceManager
+          sources={sources}
+          onAdd={addSource}
+          onRemove={removeSource}
+          onQuickAdd={quickAdd}
+          onBulkAdd={bulkAdd}
+          onClearAll={clearAll}
+          onResetDefaults={resetDefaults}
+          activeSource={activeSource}
+          onSelect={setActiveSource}
+          hasSource={hasSource}
+        />
       </header>
 
       {/* Main layout */}

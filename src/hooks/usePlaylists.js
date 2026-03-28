@@ -1,21 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { parseM3U } from '../utils/m3uParser';
+import { DEFAULT_SOURCES, CATALOG_VERSION } from '../data/sourceCatalog';
 
 const STORAGE_KEY = 'nicetv_sources';
 const VERSION_KEY = 'nicetv_sources_version';
 
-// Bump this number any time you add, remove, or change default sources.
-// Existing users will automatically receive new defaults on their next visit.
-const DEFAULTS_VERSION = 2;
-
-const DEFAULT_SOURCES = [
-  { id: '1', name: 'IPTV-Org Global', url: 'https://iptv-org.github.io/iptv/index.m3u', channels: [] },
-  { id: '2', name: 'Pluto TV', url: 'https://i.mjh.nz/PlutoTV/all.m3u8', channels: [] },
-  { id: '3', name: 'Free-TV GitHub', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8', channels: [] },
-  { id: '4', name: 'RW1986 Curated', url: 'https://github.com/RW1986/IPTV/raw/main/lineup.m3u8', channels: [] },
-  { id: '5', name: 'Samsung TV Plus', url: 'https://apsattv.com/ssungusa.m3u', channels: [] },
-  { id: '6', name: 'XUMO', url: 'https://www.apsattv.com/xumo.m3u', channels: [] },
-];
+function initSources(defaults) {
+  return defaults.map(d => ({ ...d, channels: [] }));
+}
 
 /**
  * Merge new default sources into a user's existing saved list.
@@ -23,7 +15,7 @@ const DEFAULT_SOURCES = [
  */
 function mergeDefaults(saved) {
   const existingUrls = new Set(saved.map(s => s.url));
-  const newSources = DEFAULT_SOURCES.filter(d => !existingUrls.has(d.url));
+  const newSources = initSources(DEFAULT_SOURCES).filter(d => !existingUrls.has(d.url));
   return [...saved, ...newSources];
 }
 
@@ -34,24 +26,22 @@ export function usePlaylists() {
       const savedVersion = Number(localStorage.getItem(VERSION_KEY) || '0');
 
       if (!saved) {
-        // First-time visitor — give them the full default list
-        localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
-        return DEFAULT_SOURCES;
+        localStorage.setItem(VERSION_KEY, String(CATALOG_VERSION));
+        return initSources(DEFAULT_SOURCES);
       }
 
       const parsed = JSON.parse(saved);
 
-      if (savedVersion < DEFAULTS_VERSION) {
-        // Returning visitor with outdated defaults — merge in new sources
+      if (savedVersion < CATALOG_VERSION) {
         const merged = mergeDefaults(parsed);
-        localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
+        localStorage.setItem(VERSION_KEY, String(CATALOG_VERSION));
         return merged;
       }
 
       return parsed;
     } catch {
-      localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
-      return DEFAULT_SOURCES;
+      localStorage.setItem(VERSION_KEY, String(CATALOG_VERSION));
+      return initSources(DEFAULT_SOURCES);
     }
   });
   const [activeSource, setActiveSource] = useState(null);
@@ -60,20 +50,54 @@ export function usePlaylists() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
   }, [sources]);
 
-  const addSource = async (name, url) => {
+  // Add a single source by name + URL
+  const addSource = useCallback(async (name, url) => {
+    // Prevent duplicates
+    if (sources.some(s => s.url === url)) return;
     const channels = await parseM3U(url);
     const newSource = { id: Date.now().toString(), name, url, channels };
     setSources(prev => [...prev, newSource]);
     setActiveSource(newSource);
-  };
+  }, [sources]);
 
-  const removeSource = (id) => {
+  // Quick-add from catalog (no parse yet — lazy-loads on select)
+  const quickAdd = useCallback((name, url) => {
+    if (sources.some(s => s.url === url)) return;
+    const newSource = { id: `cat-${Date.now()}`, name, url, channels: [] };
+    setSources(prev => [...prev, newSource]);
+  }, [sources]);
+
+  // Bulk quick-add multiple sources at once
+  const bulkAdd = useCallback((entries) => {
+    const existingUrls = new Set(sources.map(s => s.url));
+    const fresh = entries
+      .filter(e => !existingUrls.has(e.url))
+      .map((e, i) => ({ id: `bulk-${Date.now()}-${i}`, name: e.name, url: e.url, channels: [] }));
+    if (fresh.length) setSources(prev => [...prev, ...fresh]);
+  }, [sources]);
+
+  // Remove a single source
+  const removeSource = useCallback((id) => {
     setSources(prev => prev.filter(s => s.id !== id));
-    setActiveSource(null);
-  };
+    setActiveSource(prev => (prev?.id === id ? null : prev));
+  }, []);
 
-  const selectSource = async (source) => {
-    if (!source.channels.length) {
+  // Clear ALL sources
+  const clearAll = useCallback(() => {
+    setSources([]);
+    setActiveSource(null);
+  }, []);
+
+  // Reset to defaults only
+  const resetDefaults = useCallback(() => {
+    setSources(initSources(DEFAULT_SOURCES));
+    setActiveSource(null);
+  }, []);
+
+  // Select a source (lazy-parse its M3U if not yet loaded)
+  const selectSource = useCallback(async (source) => {
+    if (!source) { setActiveSource(null); return; }
+    if (!source.channels || !source.channels.length) {
       const channels = await parseM3U(source.url);
       const updated = { ...source, channels };
       setSources(prev => prev.map(s => s.id === source.id ? updated : s));
@@ -81,7 +105,23 @@ export function usePlaylists() {
     } else {
       setActiveSource(source);
     }
-  };
+  }, []);
 
-  return { sources, addSource, removeSource, activeSource, setActiveSource: selectSource };
+  // Check if a URL is already loaded
+  const hasSource = useCallback((url) => {
+    return sources.some(s => s.url === url);
+  }, [sources]);
+
+  return {
+    sources,
+    addSource,
+    quickAdd,
+    bulkAdd,
+    removeSource,
+    clearAll,
+    resetDefaults,
+    activeSource,
+    setActiveSource: selectSource,
+    hasSource,
+  };
 }
