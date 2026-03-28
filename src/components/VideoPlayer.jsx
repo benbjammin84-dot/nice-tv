@@ -1,37 +1,84 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import { getProxiedStreamUrl } from '../utils/m3uParser';
 
 export default function VideoPlayer({ channel }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
+  const containerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [brightness, setBrightness] = useState(100);
   const [cct, setCct] = useState(0);
   const [quality, setQuality] = useState(-1);
   const [levels, setLevels] = useState([]);
-  const containerRef = useRef(null);
+  const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'playing' | 'error' | 'retrying'
+  const retriedRef = useRef(false);
 
   useEffect(() => {
     if (!channel?.url || !videoRef.current) return;
     const video = videoRef.current;
+    retriedRef.current = false;
+    setStatus('loading');
+    setLevels([]);
 
-    if (hlsRef.current) { hlsRef.current.destroy(); }
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-    if (Hls.isSupported()) {
-      const hls = new Hls();
-      hlsRef.current = hls;
-      hls.loadSource(channel.url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-        setLevels(data.levels);
+    function loadStream(url) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          xhrSetup: (xhr) => {
+            xhr.timeout = 15000;
+          },
+        });
+        hlsRef.current = hls;
+        hls.loadSource(url);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          setLevels(data.levels);
+          setStatus('playing');
+          video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            // If direct load failed, retry through CORS proxy once
+            if (!retriedRef.current && url === channel.url) {
+              retriedRef.current = true;
+              setStatus('retrying');
+              hls.destroy();
+              hlsRef.current = null;
+              loadStream(getProxiedStreamUrl(channel.url));
+            } else {
+              setStatus('error');
+            }
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = url;
+        video.addEventListener('loadeddata', () => setStatus('playing'), { once: true });
+        video.addEventListener('error', () => {
+          if (!retriedRef.current && url === channel.url) {
+            retriedRef.current = true;
+            setStatus('retrying');
+            video.src = getProxiedStreamUrl(channel.url);
+            video.play().catch(() => {});
+          } else {
+            setStatus('error');
+          }
+        }, { once: true });
         video.play().catch(() => {});
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = channel.url;
-      video.play().catch(() => {});
+      }
     }
 
-    return () => { if (hlsRef.current) hlsRef.current.destroy(); };
+    loadStream(channel.url);
+
+    return () => {
+      if (hlsRef.current) hlsRef.current.destroy();
+    };
   }, [channel]);
 
   useEffect(() => {
@@ -65,7 +112,25 @@ export default function VideoPlayer({ channel }) {
       <div ref={containerRef} className="relative bg-black rounded-xl overflow-hidden aspect-video shadow-2xl border border-niceborder">
         <video ref={videoRef} style={videoStyle} className="w-full h-full object-contain" />
 
-        {/* Overlay controls */}
+        {/* Status overlay */}
+        {(status === 'loading' || status === 'retrying') && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70">
+            <div className="text-2xl mb-2">📡</div>
+            <p className="text-sm text-nicemuted">
+              {status === 'retrying' ? 'Retrying with proxy...' : 'Connecting...'}
+            </p>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70">
+            <div className="text-2xl mb-2">📵</div>
+            <p className="text-sm text-nicemuted">Stream unavailable</p>
+            <p className="text-xs text-nicemuted/60 mt-1">This channel may be offline or geo-restricted</p>
+          </div>
+        )}
+
+        {/* Hover controls */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex items-center justify-between opacity-0 hover:opacity-100 transition-opacity">
           <span className="text-sm font-medium text-white">{channel.name}</span>
           <button onClick={toggleFullscreen} className="text-white hover:text-niceglow text-sm">
