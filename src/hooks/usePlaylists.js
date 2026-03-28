@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react';
 import { parseM3U } from '../utils/m3uParser';
 
 const STORAGE_KEY = 'nicetv_sources';
+const VERSION_KEY = 'nicetv_sources_version';
+
+// Bump this number any time you add, remove, or change default sources.
+// Existing users will automatically receive new defaults on their next visit.
+const DEFAULTS_VERSION = 2;
 
 const DEFAULT_SOURCES = [
   { id: '1', name: 'IPTV-Org Global', url: 'https://iptv-org.github.io/iptv/index.m3u', channels: [] },
@@ -12,12 +17,42 @@ const DEFAULT_SOURCES = [
   { id: '6', name: 'XUMO', url: 'https://www.apsattv.com/xumo.m3u', channels: [] },
 ];
 
+/**
+ * Merge new default sources into a user's existing saved list.
+ * Keeps any sources the user added manually and avoids duplicates.
+ */
+function mergeDefaults(saved) {
+  const existingUrls = new Set(saved.map(s => s.url));
+  const newSources = DEFAULT_SOURCES.filter(d => !existingUrls.has(d.url));
+  return [...saved, ...newSources];
+}
+
 export function usePlaylists() {
   const [sources, setSources] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : DEFAULT_SOURCES;
-    } catch { return DEFAULT_SOURCES; }
+      const savedVersion = Number(localStorage.getItem(VERSION_KEY) || '0');
+
+      if (!saved) {
+        // First-time visitor — give them the full default list
+        localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
+        return DEFAULT_SOURCES;
+      }
+
+      const parsed = JSON.parse(saved);
+
+      if (savedVersion < DEFAULTS_VERSION) {
+        // Returning visitor with outdated defaults — merge in new sources
+        const merged = mergeDefaults(parsed);
+        localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
+        return merged;
+      }
+
+      return parsed;
+    } catch {
+      localStorage.setItem(VERSION_KEY, String(DEFAULTS_VERSION));
+      return DEFAULT_SOURCES;
+    }
   });
   const [activeSource, setActiveSource] = useState(null);
 
