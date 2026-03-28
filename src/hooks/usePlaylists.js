@@ -6,7 +6,10 @@ const STORAGE_KEY = 'nicetv_sources';
 const DEFAULT_SOURCES = [
   { id: '1', name: 'IPTV-Org Global', url: 'https://iptv-org.github.io/iptv/index.m3u', channels: [] },
   { id: '2', name: 'Pluto TV', url: 'https://i.mjh.nz/PlutoTV/all.m3u8', channels: [] },
-  { id: '3', name: 'Samsung TV Plus', url: 'https://apsattv.com/ssungusa.m3u', channels: [] },
+  { id: '3', name: 'Free-TV GitHub', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8', channels: [] },
+  { id: '4', name: 'RW1986 Curated', url: 'https://github.com/RW1986/IPTV/raw/main/lineup.m3u8', channels: [] },
+  { id: '5', name: 'Samsung TV Plus', url: 'https://apsattv.com/ssungusa.m3u', channels: [] },
+  { id: '6', name: 'XUMO', url: 'https://www.apsattv.com/xumo.m3u', channels: [] },
 ];
 
 export function usePlaylists() {
