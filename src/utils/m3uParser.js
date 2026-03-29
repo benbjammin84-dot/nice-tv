@@ -1,27 +1,28 @@
-import { isProxyAvailable, getProxyFetchUrl } from './proxy';
-
 /**
- * CORS proxies — fallback when local proxy isn't running.
+ * Nice TV — M3U Parser
+ * Primary proxy: Cloudflare Worker (summer-sound-bd21.benjaminphinisee.workers.dev)
+ * Fallbacks: direct fetch, allorigins, corsproxy.io
  */
-const CORS_PROXIES = [
+
+const CF_PROXY = (url) =>
+  `https://summer-sound-bd21.benjaminphinisee.workers.dev/?url=${encodeURIComponent(url)}`;
+
+const FALLBACK_PROXIES = [
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
 ];
 
 async function fetchWithFallback(url) {
-  // 1. Try local proxy first (fastest, most reliable)
-  if (await isProxyAvailable()) {
-    try {
-      const res = await fetch(getProxyFetchUrl(url), { signal: AbortSignal.timeout(15000) });
-      if (res.ok) {
-        const text = await res.text();
-        if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
-      }
-    } catch {}
-  }
+  // 1. Cloudflare Worker — primary, fastest, always-on
+  try {
+    const res = await fetch(CF_PROXY(url), { signal: AbortSignal.timeout(15000) });
+    if (res.ok) {
+      const text = await res.text();
+      if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
+    }
+  } catch {}
 
-  // 2. Try direct fetch (works for GitHub-hosted files with CORS headers)
+  // 2. Direct fetch (works for GitHub-hosted M3Us with CORS headers)
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (res.ok) {
@@ -30,8 +31,8 @@ async function fetchWithFallback(url) {
     }
   } catch {}
 
-  // 3. Try each remote CORS proxy
-  for (const proxy of CORS_PROXIES) {
+  // 3. Fallback CORS proxies
+  for (const proxy of FALLBACK_PROXIES) {
     try {
       const res = await fetch(proxy(url), { signal: AbortSignal.timeout(15000) });
       if (res.ok) {
