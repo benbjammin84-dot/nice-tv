@@ -4,14 +4,21 @@ import { parseM3U } from '../utils/m3uParser';
 const STORAGE_KEY = 'nicetv_sources';
 
 const DEFAULT_SOURCES = [
-  { id: '1', name: 'Pluto TV', url: 'https://i.mjh.nz/PlutoTV/all.m3u8', channels: [] },
-  { id: '2', name: 'Free-TV (Global)', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8', channels: [] },
-  { id: '3', name: 'Samsung TV Plus', url: 'https://apsattv.com/ssungusa.m3u', channels: [] },
-  { id: '4', name: 'XUMO', url: 'https://www.apsattv.com/xumo.m3u', channels: [] },
-  { id: '5', name: 'IPTV-Org Global', url: 'https://iptv-org.github.io/iptv/index.m3u', channels: [] },
+  { id: '1', name: 'Pluto TV', url: 'https://i.mjh.nz/PlutoTV/all.m3u8' },
+  { id: '2', name: 'Free-TV (Global)', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8' },
+  { id: '3', name: 'Samsung TV Plus', url: 'https://apsattv.com/ssungusa.m3u' },
+  { id: '4', name: 'XUMO', url: 'https://www.apsattv.com/xumo.m3u' },
+  { id: '5', name: 'IPTV-Org Global', url: 'https://iptv-org.github.io/iptv/index.m3u' },
 ];
 
+// Strip channels before saving — they can be huge (30k+ entries)
+function toStorable(sources) {
+  return sources.map(({ channels, ...rest }) => rest);
+}
+
 export function usePlaylists() {
+  // sources in state may carry a loaded channels array in memory,
+  // but we never write channels to localStorage
   const [sources, setSources] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -19,16 +26,25 @@ export function usePlaylists() {
     } catch { return DEFAULT_SOURCES; }
   });
   const [activeSource, setActiveSourceState] = useState(null);
+  const [loadingSource, setLoadingSource] = useState(false);
 
+  // Persist only metadata (no channels)
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toStorable(sources)));
+    } catch (e) {
+      console.warn('Could not save sources to localStorage:', e);
+    }
   }, [sources]);
 
   const addSource = async (name, url) => {
-    const channels = await parseM3U(url);
-    const newSource = { id: Date.now().toString(), name, url, channels };
+    const newSource = { id: Date.now().toString(), name, url };
     setSources(prev => [...prev, newSource]);
-    setActiveSourceState(newSource);
+    // Load channels into memory for immediate use but don't block
+    const channels = await parseM3U(url);
+    const withChannels = { ...newSource, channels };
+    setSources(prev => prev.map(s => s.id === newSource.id ? { ...s } : s));
+    setActiveSourceState(withChannels);
   };
 
   const quickAdd = (name, url) => addSource(name, url);
@@ -54,22 +70,32 @@ export function usePlaylists() {
 
   const hasSource = (url) => sources.some(s => s.url === url);
 
+  // Selecting a source: load channels into memory only (not localStorage)
   const setActiveSource = async (source) => {
     if (!source) { setActiveSourceState(null); return; }
-    if (!source.channels || source.channels.length === 0) {
+    // Already loaded in memory this session
+    if (source.channels && source.channels.length > 0) {
+      setActiveSourceState(source);
+      return;
+    }
+    setLoadingSource(true);
+    try {
       const channels = await parseM3U(source.url);
       const updated = { ...source, channels };
+      // Update in-memory state only (not persisted)
       setSources(prev => prev.map(s => s.id === source.id ? updated : s));
       setActiveSourceState(updated);
-    } else {
-      setActiveSourceState(source);
+    } catch (e) {
+      console.warn('Failed to load source:', e);
+      setActiveSourceState({ ...source, channels: [] });
     }
+    setLoadingSource(false);
   };
 
   return {
     sources, addSource, quickAdd, bulkAdd,
     removeSource, clearAll, resetDefaults,
     activeSource, setActiveSource,
-    hasSource,
+    hasSource, loadingSource,
   };
 }
