@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 
 function fmt(ts) {
   if (!ts) return '';
@@ -6,52 +6,102 @@ function fmt(ts) {
 }
 
 export default function GuideView({ channels, getNowNext, onChannelSelect }) {
-  const withEPG = channels.filter(ch => ch.tvgId && getNowNext(ch.tvgId).now);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('All');
 
-  if (withEPG.length === 0) return (
+  const categories = useMemo(() => {
+    const groups = [...new Set((channels || []).map(c => c.group).filter(Boolean))];
+    return ['All', ...groups];
+  }, [channels]);
+
+  const filtered = useMemo(() => {
+    return (channels || []).filter(ch => {
+      const matchCat = category === 'All' || ch.group === category;
+      const matchSearch = !search || ch.name.toLowerCase().includes(search.toLowerCase());
+      return matchCat && matchSearch;
+    }).slice(0, 200); // cap at 200 for render perf
+  }, [channels, search, category]);
+
+  if (!channels || channels.length === 0) return (
     <div className="p-8 text-nicemuted text-center">
       <div className="text-4xl mb-3">📋</div>
-      <p className="text-sm">No EPG data available for these channels.</p>
-      <p className="text-xs mt-1">Channels need a tvg-id in their M3U entry for guide data.</p>
+      <p className="text-sm">No source loaded.</p>
+      <p className="text-xs mt-1">Select a source in the header to see the guide.</p>
     </div>
   );
 
   return (
-    <div className="overflow-y-auto h-full p-4">
-      <h2 className="text-niceaccent font-bold mb-4 tracking-widest text-sm">📋 CHANNEL GUIDE</h2>
-      <div className="space-y-2">
-        {withEPG.map((ch, i) => {
-          const { now, next } = getNowNext(ch.tvgId);
-          return (
-            <div
-              key={i}
-              className="bg-nicecard border border-niceborder rounded-lg p-3 cursor-pointer hover:border-niceaccent transition-colors"
-              onClick={() => onChannelSelect(ch)}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                {ch.logo
-                  ? <img src={ch.logo} alt="" className="w-8 h-8 rounded object-contain bg-black" onError={e => e.target.style.display='none'} />
-                  : <div className="w-8 h-8 rounded bg-niceborder flex items-center justify-center text-sm">📺</div>
-                }
-                <span className="font-semibold text-sm text-nicetext">{ch.name}</span>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-niceborder bg-nicepanel flex-shrink-0">
+        <input
+          className="flex-1 bg-nicecard border border-niceborder rounded px-3 py-1.5 text-sm text-nicetext focus:outline-none focus:border-niceaccent"
+          placeholder="Search channels..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select
+          className="bg-nicecard border border-niceborder text-nicetext text-sm rounded px-2 py-1.5 focus:outline-none focus:border-niceaccent max-w-[180px]"
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+        >
+          {categories.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+        <span className="text-xs text-nicemuted whitespace-nowrap">
+          {filtered.length}{filtered.length === 200 ? '+' : ''} channels
+        </span>
+      </div>
+
+      {/* Channel grid */}
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="space-y-2">
+          {filtered.map((ch, i) => {
+            const { now, next } = getNowNext ? getNowNext(ch.tvgId) : {};
+            return (
+              <div
+                key={i}
+                className="bg-nicecard border border-niceborder rounded-lg p-3 cursor-pointer hover:border-niceaccent transition-colors group"
+                onClick={() => onChannelSelect(ch)}
+              >
+                <div className="flex items-center gap-3">
+                  {ch.logo
+                    ? <img src={ch.logo} alt="" className="w-8 h-8 rounded object-contain bg-black flex-shrink-0" onError={e => e.target.style.display='none'} />
+                    : <div className="w-8 h-8 rounded bg-niceborder flex items-center justify-center text-sm flex-shrink-0">📺</div>
+                  }
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm text-nicetext truncate">{ch.name}</span>
+                      {ch.group && (
+                        <span className="text-xs text-nicemuted bg-nicebg px-1.5 py-0.5 rounded whitespace-nowrap">{ch.group}</span>
+                      )}
+                    </div>
+                    {now ? (
+                      <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs bg-niceaccent text-white px-1.5 py-0.5 rounded">NOW</span>
+                        <span className="text-xs text-nicetext truncate">{now.title}</span>
+                        <span className="text-xs text-nicemuted">{fmt(now.start)}–{fmt(now.stop)}</span>
+                        {next && (
+                          <>
+                            <span className="text-xs text-nicemuted">·</span>
+                            <span className="text-xs text-nicemuted">NEXT: {next.title} @ {fmt(next.start)}</span>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs text-nicemuted/50">No EPG data</div>
+                    )}
+                  </div>
+                  <span className="text-xs text-niceaccent opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">▶ Watch</span>
+                </div>
               </div>
-              {now && (
-                <div className="mb-1">
-                  <span className="text-xs bg-niceaccent text-white px-1.5 py-0.5 rounded mr-2">NOW</span>
-                  <span className="text-xs text-nicetext">{now.title}</span>
-                  <span className="text-xs text-nicemuted ml-2">{fmt(now.start)}–{fmt(now.stop)}</span>
-                </div>
-              )}
-              {next && (
-                <div>
-                  <span className="text-xs bg-niceborder text-nicemuted px-1.5 py-0.5 rounded mr-2">NEXT</span>
-                  <span className="text-xs text-nicemuted">{next.title}</span>
-                  <span className="text-xs text-nicemuted ml-2">{fmt(next.start)}</span>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="text-nicemuted text-sm text-center py-12">No channels match your search.</p>
+          )}
+        </div>
       </div>
     </div>
   );
