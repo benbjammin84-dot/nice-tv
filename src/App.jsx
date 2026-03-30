@@ -4,7 +4,6 @@ import ChannelList from './components/ChannelList';
 import VideoPlayer from './components/VideoPlayer';
 import GuideView from './components/GuideView';
 import VODView from './components/VODView';
-import EPGNowNext from './components/EPGNowNext';
 import { usePlaylists } from './hooks/usePlaylists';
 import { useEPG } from './hooks/useEPG';
 import { useVOD } from './hooks/useVOD';
@@ -13,13 +12,11 @@ const TABS = ['LIVE', 'GUIDE', 'VOD'];
 const CF_PROXY = 'https://summer-sound-bd21.benjaminphinisee.workers.dev';
 
 async function resolveIAPlayUrl(identifier) {
-  // Fetch the IA metadata to find a playable video/audio file
   try {
     const metaUrl = `https://archive.org/metadata/${identifier}`;
     const res = await fetch(`${CF_PROXY}/?url=${encodeURIComponent(metaUrl)}`);
     const data = await res.json();
     const files = data.files || [];
-    // Prefer mp4, then ogv, then ogg/mp3 for audio
     const prefer = ['mp4', 'ogv', 'ogg', 'mp3', 'flac'];
     for (const ext of prefer) {
       const f = files.find(f => f.name && f.name.toLowerCase().endsWith('.' + ext) && f.source !== 'metadata');
@@ -48,7 +45,6 @@ export default function App() {
 
   async function handleVODPlay(item) {
     if (item.url && item.url.includes('archive.org/details/')) {
-      // Extract identifier and resolve a direct stream URL
       const identifier = item.url.split('archive.org/details/')[1]?.split('?')[0];
       if (!identifier) return;
       setVodLoading(true);
@@ -62,7 +58,6 @@ export default function App() {
         });
         setTab('LIVE');
       } else {
-        // Fallback: open in new tab only if we truly can't resolve
         window.open(item.url, '_blank');
       }
     } else if (item.url) {
@@ -73,7 +68,6 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-nicebg text-nicetext font-tv overflow-hidden">
-      {/* Header */}
       <header className="flex items-center justify-between px-6 py-3 border-b border-niceborder bg-nicepanel">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-bold tracking-widest glow text-niceglow">📺 NICE TV</h1>
@@ -111,7 +105,6 @@ export default function App() {
         </div>
       )}
 
-      {/* LIVE TAB */}
       {tab === 'LIVE' && (
         <div className="flex flex-1 overflow-hidden">
           <aside className="w-72 border-r border-niceborder bg-nicepanel overflow-y-auto flex-shrink-0">
@@ -130,7 +123,6 @@ export default function App() {
         </div>
       )}
 
-      {/* GUIDE TAB */}
       {tab === 'GUIDE' && (
         <div className="flex-1 overflow-hidden">
           <GuideView
@@ -141,7 +133,6 @@ export default function App() {
         </div>
       )}
 
-      {/* VOD TAB */}
       {tab === 'VOD' && (
         <div className="flex-1 overflow-hidden">
           <VODView
