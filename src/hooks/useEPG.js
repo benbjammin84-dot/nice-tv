@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const CF_PROXY = 'https://summer-sound-bd21.benjaminphinisee.workers.dev';
 const EPG_CACHE_KEY = 'nicetv_epg_cache';
-const EPG_CACHE_TTL = 1000 * 60 * 30; // 30 min
+const EPG_CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
+// iptv-org EPG index — lists every available guide with its channel list
+const EPG_INDEX_URL = 'https://iptv-org.github.io/epg/index.json';
 
 function proxyUrl(url) {
   return `${CF_PROXY}/?url=${encodeURIComponent(url)}`;
@@ -25,12 +28,11 @@ function parseXMLTV(xmlText) {
     guide[channel].push({ start, stop, title, desc });
   });
 
-  // For each channel keep only current + upcoming
   Object.keys(guide).forEach(ch => {
     guide[ch] = guide[ch]
       .filter(p => p.stop > now)
       .sort((a, b) => a.start - b.start)
-      .slice(0, 5);
+      .slice(0, 8);
   });
 
   return guide;
@@ -38,48 +40,86 @@ function parseXMLTV(xmlText) {
 
 function parseXMLTVDate(str) {
   if (!str) return 0;
-  // Format: 20240101120000 +0000
   const m = str.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
   if (!m) return 0;
   return Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]);
 }
 
+// Strip the @SD/@HD/@Plus1 suffix from tvg-id to get the base channel id
+function normalizeId(tvgId) {
+  return tvgId ? tvgId.replace(/@.*$/, '').toLowerCase() : '';
+}
+
 export function useEPG(channels) {
   const [epg, setEpg] = useState({});
   const [loading, setLoading] = useState(false);
+  const fetchedRef = useRef(false);
+
+  const channelKey = channels?.map(c => c.tvgId).filter(Boolean).slice(0, 20).join(',') || '';
 
   useEffect(() => {
-    const tvgIds = channels?.map(c => c.tvgId).filter(Boolean) || [];
-    if (tvgIds.length === 0) return;
+    if (!channelKey) return;
 
     // Check cache
     try {
       const cached = JSON.parse(localStorage.getItem(EPG_CACHE_KEY) || '{}');
-      if (cached.ts && Date.now() - cached.ts < EPG_CACHE_TTL && cached.data) {
+      if (cached.ts && Date.now() - cached.ts < EPG_CACHE_TTL && cached.data && Object.keys(cached.data).length > 0) {
         setEpg(cached.data);
         return;
       }
     } catch {}
 
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
     setLoading(true);
-    const epgUrl = 'https://iptv-org.github.io/epg/guides/us/tvtv.us.epg.xml';
 
-    fetch(proxyUrl(epgUrl))
-      .then(r => r.text())
-      .then(xml => {
-        const guide = parseXMLTV(xml);
-        setEpg(guide);
+    // Build a set of normalized tvg-ids from loaded channels
+    const tvgIds = new Set(
+      (channels || []).map(c => normalizeId(c.tvgId)).filter(Boolean)
+    );
+
+    // Fetch the EPG index to find guides that cover our channels
+    fetch(proxyUrl(EPG_INDEX_URL))
+      .then(r => r.json())
+      .then(async (index) => {
+        // Each index entry has { id, name, url, channels: [{id}] }
+        // Find guides that overlap with our channel tvg-ids
+        const matchingGuides = index.filter(guide =>
+          guide.channels?.some(ch => tvgIds.has(normalizeId(ch.id)))
+        ).slice(0, 5); // cap at 5 guides to avoid huge fetches
+
+        if (matchingGuides.length === 0) {
+          // Fallback to a general guide
+          matchingGuides.push({ url: 'https://iptv-org.github.io/epg/guides/us/tvtv.us.epg.xml' });
+        }
+
+        const merged = {};
+        await Promise.all(
+          matchingGuides.map(guide =>
+            fetch(proxyUrl(guide.url))
+              .then(r => r.text())
+              .then(xml => {
+                const g = parseXMLTV(xml);
+                Object.assign(merged, g);
+              })
+              .catch(() => {})
+          )
+        );
+
+        setEpg(merged);
         try {
-          localStorage.setItem(EPG_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: guide }));
+          localStorage.setItem(EPG_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: merged }));
         } catch {}
       })
-      .catch(err => console.warn('EPG fetch failed:', err))
+      .catch(err => console.warn('EPG index fetch failed:', err))
       .finally(() => setLoading(false));
-  }, [channels?.map(c => c.tvgId).join(',')]);
+  }, [channelKey]);
 
   function getNowNext(tvgId) {
-    if (!tvgId || !epg[tvgId]) return { now: null, next: null };
-    const progs = epg[tvgId];
+    if (!tvgId) return { now: null, next: null };
+    // Try exact match first, then normalized
+    const progs = epg[tvgId] || epg[normalizeId(tvgId)] || null;
+    if (!progs) return { now: null, next: null };
     const nowTs = Date.now();
     const nowProg = progs.find(p => p.start <= nowTs && p.stop > nowTs);
     const nextProg = progs.find(p => p.start > nowTs);

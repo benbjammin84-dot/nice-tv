@@ -10,6 +10,26 @@ import { useEPG } from './hooks/useEPG';
 import { useVOD } from './hooks/useVOD';
 
 const TABS = ['LIVE', 'GUIDE', 'VOD'];
+const CF_PROXY = 'https://summer-sound-bd21.benjaminphinisee.workers.dev';
+
+async function resolveIAPlayUrl(identifier) {
+  // Fetch the IA metadata to find a playable video/audio file
+  try {
+    const metaUrl = `https://archive.org/metadata/${identifier}`;
+    const res = await fetch(`${CF_PROXY}/?url=${encodeURIComponent(metaUrl)}`);
+    const data = await res.json();
+    const files = data.files || [];
+    // Prefer mp4, then ogv, then ogg/mp3 for audio
+    const prefer = ['mp4', 'ogv', 'ogg', 'mp3', 'flac'];
+    for (const ext of prefer) {
+      const f = files.find(f => f.name && f.name.toLowerCase().endsWith('.' + ext) && f.source !== 'metadata');
+      if (f) return `https://archive.org/download/${identifier}/${encodeURIComponent(f.name)}`;
+    }
+  } catch (e) {
+    console.warn('IA resolve failed', e);
+  }
+  return null;
+}
 
 export default function App() {
   const {
@@ -20,15 +40,31 @@ export default function App() {
   const [activeChannel, setActiveChannel] = useState(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [tab, setTab] = useState('LIVE');
+  const [vodLoading, setVodLoading] = useState(false);
 
   const { getNowNext } = useEPG(activeSource?.channels);
 
   const vod = useVOD();
 
-  function handleVODPlay(item) {
-    // For IA items open detail page; for BYOS items play directly
-    if (item.url && item.url.includes('archive.org/details')) {
-      window.open(item.url, '_blank');
+  async function handleVODPlay(item) {
+    if (item.url && item.url.includes('archive.org/details/')) {
+      // Extract identifier and resolve a direct stream URL
+      const identifier = item.url.split('archive.org/details/')[1]?.split('?')[0];
+      if (!identifier) return;
+      setVodLoading(true);
+      const streamUrl = await resolveIAPlayUrl(identifier);
+      setVodLoading(false);
+      if (streamUrl) {
+        setActiveChannel({
+          name: item.title || item.name || identifier,
+          url: streamUrl,
+          logo: item.thumb || '',
+        });
+        setTab('LIVE');
+      } else {
+        // Fallback: open in new tab only if we truly can't resolve
+        window.open(item.url, '_blank');
+      }
     } else if (item.url) {
       setActiveChannel({ name: item.title || item.name, url: item.url, logo: item.thumb || '' });
       setTab('LIVE');
@@ -41,7 +77,6 @@ export default function App() {
       <header className="flex items-center justify-between px-6 py-3 border-b border-niceborder bg-nicepanel">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-bold tracking-widest glow text-niceglow">📺 NICE TV</h1>
-          {/* Tabs */}
           <nav className="flex gap-1">
             {TABS.map(t => (
               <button
@@ -69,6 +104,12 @@ export default function App() {
           hasSource={hasSource}
         />
       </header>
+
+      {vodLoading && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+          <div className="text-niceaccent text-sm font-bold tracking-widest animate-pulse">🎬 Loading stream...</div>
+        </div>
+      )}
 
       {/* LIVE TAB */}
       {tab === 'LIVE' && (
