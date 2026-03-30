@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import VideoPlayer from './VideoPlayer';
 
 function fmt(ts) {
@@ -26,7 +26,6 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
 
   function handleSelect(ch) {
     setActiveChannel(ch);
-    // Also bubble up so LIVE tab stays in sync if user switches
     onChannelSelect && onChannelSelect(ch);
   }
 
@@ -43,7 +42,6 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
-      {/* Mini player — shown when a channel is selected */}
       {activeChannel && (
         <div className="flex gap-4 p-4 border-b border-niceborder bg-nicepanel flex-shrink-0">
           <div className="w-64 aspect-video bg-black rounded-lg overflow-hidden flex-shrink-0">
@@ -80,7 +78,6 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
         </div>
       )}
 
-      {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-niceborder bg-nicepanel flex-shrink-0">
         <input
           className="flex-1 bg-nicecard border border-niceborder rounded px-3 py-1.5 text-sm text-nicetext focus:outline-none focus:border-niceaccent"
@@ -102,7 +99,6 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
         </span>
       </div>
 
-      {/* Channel list */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-2">
           {filtered.map((ch, i) => {
@@ -112,9 +108,7 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
               <div
                 key={i}
                 className={`border rounded-lg p-3 cursor-pointer transition-colors group ${
-                  isActive
-                    ? 'border-niceaccent bg-nicecard'
-                    : 'border-niceborder bg-nicecard hover:border-niceaccent'
+                  isActive ? 'border-niceaccent bg-nicecard' : 'border-niceborder bg-nicecard hover:border-niceaccent'
                 }`}
                 onClick={() => handleSelect(ch)}
               >
