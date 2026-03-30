@@ -1,11 +1,4 @@
-/**
- * Nice TV — M3U Parser
- * Primary proxy: Cloudflare Worker (summer-sound-bd21.benjaminphinisee.workers.dev)
- * Fallbacks: direct fetch, allorigins, corsproxy.io
- */
-
-const CF_PROXY = (url) =>
-  `https://summer-sound-bd21.benjaminphinisee.workers.dev/?url=${encodeURIComponent(url)}`;
+import { proxyFetch } from './proxy';
 
 const FALLBACK_PROXIES = [
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
@@ -13,16 +6,16 @@ const FALLBACK_PROXIES = [
 ];
 
 async function fetchWithFallback(url) {
-  // 1. Cloudflare Worker — primary, fastest, always-on
+  // 1. Smart proxy (local or CF Worker)
   try {
-    const res = await fetch(CF_PROXY(url), { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(proxyFetch(url), { signal: AbortSignal.timeout(20000) });
     if (res.ok) {
       const text = await res.text();
       if (text.includes('#EXTINF') || text.includes('#EXTM3U')) return text;
     }
   } catch {}
 
-  // 2. Direct fetch (works for GitHub-hosted M3Us with CORS headers)
+  // 2. Direct fetch
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (res.ok) {

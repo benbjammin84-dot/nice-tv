@@ -1,42 +1,30 @@
 /**
- * Local proxy helper.
- *
- * Checks if the local Nice TV proxy is running (localhost:8888).
- * If it is, routes all requests through it for CORS-free playback.
- * If it isn't, falls back to free CORS proxies.
+ * Nice TV — Smart Proxy
+ * Uses localhost:8888 when running locally (dev or local build),
+ * falls back to Cloudflare Worker for production (GitHub Pages).
  */
 
+const CF_PROXY = 'https://summer-sound-bd21.benjaminphinisee.workers.dev';
 const LOCAL_PROXY = 'http://localhost:8888';
 
-let _proxyAvailable = null; // cached result
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 /**
- * Check if the local proxy is running. Caches the result for 30s.
+ * Proxy a general fetch (M3U, EPG XML, JSON, etc.)
+ * Local: http://localhost:8888/fetch?url=...
+ * Prod:  https://cf-worker/?url=...
  */
-export async function isProxyAvailable() {
-  if (_proxyAvailable !== null) return _proxyAvailable;
-  try {
-    const res = await fetch(`${LOCAL_PROXY}/health`, { signal: AbortSignal.timeout(2000) });
-    const data = await res.json();
-    _proxyAvailable = data.status === 'ok';
-  } catch {
-    _proxyAvailable = false;
-  }
-  // Re-check every 30 seconds
-  setTimeout(() => { _proxyAvailable = null; }, 30000);
-  return _proxyAvailable;
+export function proxyFetch(url) {
+  if (isLocal) return `${LOCAL_PROXY}/fetch?url=${encodeURIComponent(url)}`;
+  return `${CF_PROXY}/?url=${encodeURIComponent(url)}`;
 }
 
 /**
- * Get the proxied URL for fetching playlist files.
+ * Proxy a stream (HLS rewriting, segments, etc.)
+ * Local: http://localhost:8888/stream?url=...
+ * Prod:  https://cf-worker/?url=... (best effort, no rewrite)
  */
-export function getProxyFetchUrl(url) {
-  return `${LOCAL_PROXY}/fetch?url=${encodeURIComponent(url)}`;
-}
-
-/**
- * Get the proxied URL for streaming video.
- */
-export function getProxyStreamUrl(url) {
-  return `${LOCAL_PROXY}/stream?url=${encodeURIComponent(url)}`;
+export function proxyStream(url) {
+  if (isLocal) return `${LOCAL_PROXY}/stream?url=${encodeURIComponent(url)}`;
+  return `${CF_PROXY}/?url=${encodeURIComponent(url)}`;
 }

@@ -1,14 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { proxyFetch } from '../utils/proxy';
 
-const CF_PROXY = 'https://summer-sound-bd21.benjaminphinisee.workers.dev';
 const EPG_CACHE_KEY = 'nicetv_epg_cache';
 const EPG_CACHE_TTL = 1000 * 60 * 60; // 1 hour
-
 const EPG_INDEX_URL = 'https://iptv-org.github.io/epg/index.json';
-
-function proxyUrl(url) {
-  return `${CF_PROXY}/?url=${encodeURIComponent(url)}`;
-}
 
 function parseXMLTV(xmlText) {
   const parser = new DOMParser();
@@ -60,7 +55,13 @@ export function useEPG(channels) {
 
   useEffect(() => {
     if (!channelKey) return;
+    fetchedRef.current = false; // reset when source changes
+  }, [channelKey]);
 
+  useEffect(() => {
+    if (!channelKey || fetchedRef.current) return;
+
+    // Check cache
     try {
       const cached = JSON.parse(localStorage.getItem(EPG_CACHE_KEY) || '{}');
       if (cached.ts && Date.now() - cached.ts < EPG_CACHE_TTL && cached.data && Object.keys(cached.data).length > 0) {
@@ -69,7 +70,6 @@ export function useEPG(channels) {
       }
     } catch {}
 
-    if (fetchedRef.current) return;
     fetchedRef.current = true;
     setLoading(true);
 
@@ -77,24 +77,37 @@ export function useEPG(channels) {
       (channels || []).map(c => normalizeId(c.tvgId)).filter(Boolean)
     );
 
-    fetch(proxyUrl(EPG_INDEX_URL))
+    // Step 1: fetch EPG index
+    fetch(proxyFetch(EPG_INDEX_URL), { signal: AbortSignal.timeout(15000) })
       .then(r => r.json())
       .then(async (index) => {
-        const matchingGuides = index.filter(guide =>
-          guide.channels?.some(ch => tvgIds.has(normalizeId(ch.id)))
-        ).slice(0, 5);
+        // Step 2: find guides matching our channels (cap at 3 to keep it fast)
+        const matchingGuides = index
+          .filter(guide => guide.channels?.some(ch => tvgIds.has(normalizeId(ch.id))))
+          .slice(0, 3);
 
         if (matchingGuides.length === 0) {
+          // Fallback: US guide
           matchingGuides.push({ url: 'https://iptv-org.github.io/epg/guides/us/tvtv.us.epg.xml' });
         }
 
+        console.log(`[EPG] Fetching ${matchingGuides.length} guide(s):`, matchingGuides.map(g => g.url));
+
+        // Step 3: fetch each guide XML through local proxy (handles large files)
         const merged = {};
         await Promise.all(
           matchingGuides.map(guide =>
-            fetch(proxyUrl(guide.url))
+            fetch(proxyFetch(guide.url), { signal: AbortSignal.timeout(30000) })
               .then(r => r.text())
-              .then(xml => { Object.assign(merged, parseXMLTV(xml)); })
-              .catch(() => {})
+              .then(xml => {
+                if (xml.trim().startsWith('<')) {
+                  Object.assign(merged, parseXMLTV(xml));
+                  console.log(`[EPG] Loaded ${Object.keys(merged).length} channels from ${guide.url}`);
+                } else {
+                  console.warn('[EPG] Got non-XML response for', guide.url);
+                }
+              })
+              .catch(e => console.warn('[EPG] Failed to fetch guide:', guide.url, e))
           )
         );
 
@@ -103,7 +116,7 @@ export function useEPG(channels) {
           localStorage.setItem(EPG_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: merged }));
         } catch {}
       })
-      .catch(err => console.warn('EPG index fetch failed:', err))
+      .catch(err => console.warn('[EPG] Index fetch failed:', err))
       .finally(() => setLoading(false));
   }, [channelKey, channels]);
 
