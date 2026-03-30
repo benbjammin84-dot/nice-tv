@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import VideoPlayer from './VideoPlayer';
 
 function fmt(ts) {
   if (!ts) return '';
@@ -8,6 +9,7 @@ function fmt(ts) {
 export default function GuideView({ channels, getNowNext, onChannelSelect }) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
+  const [activeChannel, setActiveChannel] = useState(null);
 
   const categories = useMemo(() => {
     const groups = [...new Set((channels || []).map(c => c.group).filter(Boolean))];
@@ -19,8 +21,14 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
       const matchCat = category === 'All' || ch.group === category;
       const matchSearch = !search || ch.name.toLowerCase().includes(search.toLowerCase());
       return matchCat && matchSearch;
-    }).slice(0, 200); // cap at 200 for render perf
+    }).slice(0, 200);
   }, [channels, search, category]);
+
+  function handleSelect(ch) {
+    setActiveChannel(ch);
+    // Also bubble up so LIVE tab stays in sync if user switches
+    onChannelSelect && onChannelSelect(ch);
+  }
 
   if (!channels || channels.length === 0) return (
     <div className="p-8 text-nicemuted text-center">
@@ -30,8 +38,48 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
     </div>
   );
 
+  const { now, next } = activeChannel && getNowNext ? getNowNext(activeChannel.tvgId) : {};
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
+
+      {/* Mini player — shown when a channel is selected */}
+      {activeChannel && (
+        <div className="flex gap-4 p-4 border-b border-niceborder bg-nicepanel flex-shrink-0">
+          <div className="w-64 aspect-video bg-black rounded-lg overflow-hidden flex-shrink-0">
+            <VideoPlayer channel={activeChannel} compact />
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
+            <div className="flex items-center gap-2">
+              {activeChannel.logo && (
+                <img src={activeChannel.logo} alt="" className="w-8 h-8 rounded object-contain bg-black" onError={e => e.target.style.display='none'} />
+              )}
+              <span className="font-bold text-nicetext text-base truncate">{activeChannel.name}</span>
+              {activeChannel.group && (
+                <span className="text-xs text-nicemuted bg-nicebg px-1.5 py-0.5 rounded">{activeChannel.group}</span>
+              )}
+            </div>
+            {now && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs bg-niceaccent text-white px-1.5 py-0.5 rounded">NOW</span>
+                <span className="text-sm text-nicetext truncate">{now.title}</span>
+                <span className="text-xs text-nicemuted">{fmt(now.start)}–{fmt(now.stop)}</span>
+              </div>
+            )}
+            {next && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs bg-niceborder text-nicemuted px-1.5 py-0.5 rounded">NEXT</span>
+                <span className="text-xs text-nicemuted truncate">{next.title}</span>
+                <span className="text-xs text-nicemuted">{fmt(next.start)}</span>
+              </div>
+            )}
+            {!now && !next && (
+              <span className="text-xs text-nicemuted/50 mt-1">No EPG data</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-niceborder bg-nicepanel flex-shrink-0">
         <input
@@ -54,16 +102,21 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
         </span>
       </div>
 
-      {/* Channel grid */}
+      {/* Channel list */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-2">
           {filtered.map((ch, i) => {
             const { now, next } = getNowNext ? getNowNext(ch.tvgId) : {};
+            const isActive = activeChannel?.url === ch.url;
             return (
               <div
                 key={i}
-                className="bg-nicecard border border-niceborder rounded-lg p-3 cursor-pointer hover:border-niceaccent transition-colors group"
-                onClick={() => onChannelSelect(ch)}
+                className={`border rounded-lg p-3 cursor-pointer transition-colors group ${
+                  isActive
+                    ? 'border-niceaccent bg-nicecard'
+                    : 'border-niceborder bg-nicecard hover:border-niceaccent'
+                }`}
+                onClick={() => handleSelect(ch)}
               >
                 <div className="flex items-center gap-3">
                   {ch.logo
@@ -79,21 +132,20 @@ export default function GuideView({ channels, getNowNext, onChannelSelect }) {
                     </div>
                     {now ? (
                       <div className="mt-1 flex items-center gap-2 flex-wrap">
-                        <span className="text-xs bg-niceaccent text-white px-1.5 py-0.5 rounded">NOW</span>
+                        <span className="text-xs bg-niceaccent/20 text-niceaccent px-1.5 py-0.5 rounded">NOW</span>
                         <span className="text-xs text-nicetext truncate">{now.title}</span>
                         <span className="text-xs text-nicemuted">{fmt(now.start)}–{fmt(now.stop)}</span>
                         {next && (
-                          <>
-                            <span className="text-xs text-nicemuted">·</span>
-                            <span className="text-xs text-nicemuted">NEXT: {next.title} @ {fmt(next.start)}</span>
-                          </>
+                          <span className="text-xs text-nicemuted hidden sm:inline">· NEXT: {next.title} @ {fmt(next.start)}</span>
                         )}
                       </div>
                     ) : (
-                      <div className="mt-1 text-xs text-nicemuted/50">No EPG data</div>
+                      <div className="mt-0.5 text-xs text-nicemuted/40">No EPG data</div>
                     )}
                   </div>
-                  <span className="text-xs text-niceaccent opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">▶ Watch</span>
+                  {isActive && (
+                    <span className="text-xs text-niceaccent font-bold whitespace-nowrap">▶ Playing</span>
+                  )}
                 </div>
               </div>
             );
