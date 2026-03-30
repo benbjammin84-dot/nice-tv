@@ -18,7 +18,7 @@ export function usePlaylists() {
       return saved ? JSON.parse(saved) : DEFAULT_SOURCES;
     } catch { return DEFAULT_SOURCES; }
   });
-  const [activeSource, setActiveSource] = useState(null);
+  const [activeSource, setActiveSourceState] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
@@ -28,24 +28,48 @@ export function usePlaylists() {
     const channels = await parseM3U(url);
     const newSource = { id: Date.now().toString(), name, url, channels };
     setSources(prev => [...prev, newSource]);
-    setActiveSource(newSource);
+    setActiveSourceState(newSource);
+  };
+
+  const quickAdd = (name, url) => addSource(name, url);
+
+  const bulkAdd = (items) => {
+    items.forEach(item => addSource(item.name, item.url));
   };
 
   const removeSource = (id) => {
     setSources(prev => prev.filter(s => s.id !== id));
-    setActiveSource(null);
+    setActiveSourceState(prev => prev?.id === id ? null : prev);
   };
 
-  const selectSource = async (source) => {
-    if (!source.channels.length) {
+  const clearAll = () => {
+    setSources([]);
+    setActiveSourceState(null);
+  };
+
+  const resetDefaults = () => {
+    setSources(DEFAULT_SOURCES);
+    setActiveSourceState(null);
+  };
+
+  const hasSource = (url) => sources.some(s => s.url === url);
+
+  const setActiveSource = async (source) => {
+    if (!source) { setActiveSourceState(null); return; }
+    if (!source.channels || source.channels.length === 0) {
       const channels = await parseM3U(source.url);
       const updated = { ...source, channels };
       setSources(prev => prev.map(s => s.id === source.id ? updated : s));
-      setActiveSource(updated);
+      setActiveSourceState(updated);
     } else {
-      setActiveSource(source);
+      setActiveSourceState(source);
     }
   };
 
-  return { sources, addSource, removeSource, activeSource, setActiveSource: selectSource };
+  return {
+    sources, addSource, quickAdd, bulkAdd,
+    removeSource, clearAll, resetDefaults,
+    activeSource, setActiveSource,
+    hasSource,
+  };
 }
